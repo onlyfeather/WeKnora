@@ -55,6 +55,22 @@ func getJwtSecret() string {
 	return jwtSecret
 }
 
+func sanitizeTenantForResponse(tenant *types.Tenant) *types.Tenant {
+	if tenant == nil {
+		return nil
+	}
+	cp := *tenant
+	cp.APIKey = ""
+	cp.ContextConfig = nil
+	cp.WebSearchConfig = nil
+	cp.ParserEngineConfig = nil
+	cp.Credentials = nil
+	cp.StorageEngineConfig = nil
+	cp.ChatHistoryConfig = nil
+	cp.RetrievalConfig = nil
+	return &cp
+}
+
 // userService implements the UserService interface
 type userService struct {
 	userRepo      interfaces.UserRepository
@@ -107,6 +123,10 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		logger.Errorf(ctx, "Failed to hash password: %v", err)
 		return nil, errors.New("failed to process password")
 	}
+	if err := s.preflightRegistrationAutoJoin(ctx); err != nil {
+		logger.Errorf(ctx, "Invalid registration auto-join configuration: %v", err)
+		return nil, errors.New("failed to validate shared workspace")
+	}
 
 	// Create default tenant for the user
 	// Note: RetrieverEngines is left empty - system will use defaults from RETRIEVE_DRIVER env
@@ -151,8 +171,80 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		}
 	}
 
+	if err := s.applyRegistrationAutoJoin(ctx, user); err != nil {
+		logger.Errorf(ctx, "Failed to auto-join user %s into configured tenant: %v", user.ID, err)
+		return nil, errors.New("failed to join shared workspace")
+	}
+
 	logger.Info(ctx, "User registered successfully")
 	return user, nil
+}
+
+func (s *userService) preflightRegistrationAutoJoin(ctx context.Context) error {
+	if s.config == nil || s.config.Auth == nil || s.config.Auth.AutoJoinTenantID == 0 {
+		return nil
+	}
+	if s.memberService == nil {
+		return errors.New("tenant membership service unavailable")
+	}
+	role := types.TenantRole(strings.TrimSpace(s.config.Auth.AutoJoinRole))
+	if role == "" {
+		role = types.TenantRoleViewer
+	}
+	if !role.IsValid() {
+		return fmt.Errorf("invalid auto-join role %q", s.config.Auth.AutoJoinRole)
+	}
+	if s.tenantService != nil {
+		targetTenantID := s.config.Auth.AutoJoinTenantID
+		if _, err := s.tenantService.GetTenantByID(ctx, targetTenantID); err != nil {
+			return fmt.Errorf("load auto-join tenant %d: %w", targetTenantID, err)
+		}
+	}
+	return nil
+}
+
+// applyRegistrationAutoJoin optionally adds a newly registered user to an
+// existing shared tenant. This is for self-hosted deployments that want public
+// registration while keeping the curated KB/config read-only for newcomers.
+func (s *userService) applyRegistrationAutoJoin(ctx context.Context, user *types.User) error {
+	if user == nil || s.config == nil || s.config.Auth == nil || s.config.Auth.AutoJoinTenantID == 0 {
+		return nil
+	}
+	if s.memberService == nil {
+		return errors.New("tenant membership service unavailable")
+	}
+	targetTenantID := s.config.Auth.AutoJoinTenantID
+	if targetTenantID == user.TenantID {
+		return nil
+	}
+
+	role := types.TenantRole(strings.TrimSpace(s.config.Auth.AutoJoinRole))
+	if role == "" {
+		role = types.TenantRoleViewer
+	}
+	if !role.IsValid() {
+		return fmt.Errorf("invalid auto-join role %q", s.config.Auth.AutoJoinRole)
+	}
+
+	if member, err := s.memberService.GetMembership(ctx, user.ID, targetTenantID); err != nil {
+		return fmt.Errorf("lookup auto-join membership: %w", err)
+	} else if member == nil {
+		if _, err := s.memberService.AddMember(ctx, user.ID, targetTenantID, role, nil); err != nil {
+			if !errors.Is(err, ErrMembershipAlreadyExists) {
+				return fmt.Errorf("create auto-join membership: %w", err)
+			}
+		}
+	}
+
+	if s.config.Auth.AutoJoinAsActiveTenant {
+		pref := targetTenantID
+		user.Preferences.LastActiveTenantID = &pref
+		if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+			return fmt.Errorf("persist auto-join active tenant preference: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // Login authenticates a user and returns tokens
@@ -226,7 +318,7 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 		Success:      true,
 		Message:      "Login successful",
 		User:         user,
-		ActiveTenant: tenant,
+		ActiveTenant: sanitizeTenantForResponse(tenant),
 		Memberships:  memberships,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
@@ -461,7 +553,7 @@ func (s *userService) LoginWithOIDC(ctx context.Context, code, redirectURI strin
 		Success:      true,
 		Message:      "登录成功",
 		User:         user,
-		Tenant:       tenant,
+		Tenant:       sanitizeTenantForResponse(tenant),
 		Memberships:  memberships,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
@@ -801,7 +893,7 @@ func (s *userService) SwitchTenant(
 		Success:      true,
 		Message:      "Tenant switched",
 		User:         user,
-		ActiveTenant: tenant,
+		ActiveTenant: sanitizeTenantForResponse(tenant),
 		Memberships:  memberships,
 		Token:        accessToken,
 		RefreshToken: refreshToken,

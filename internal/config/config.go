@@ -240,6 +240,13 @@ type AuthConfig struct {
 	//                            users only enter through the invitation
 	//                            flow added in PR 3.
 	RegistrationMode string `yaml:"registration_mode" json:"registration_mode"`
+	// AutoJoinTenantID, when >0, adds every newly registered user to this
+	// existing tenant. The user's personal workspace is still created for
+	// backward compatibility; AutoJoinAsActiveTenant controls whether fresh
+	// logins land in the shared tenant instead.
+	AutoJoinTenantID       uint64 `yaml:"auto_join_tenant_id"        json:"auto_join_tenant_id"`
+	AutoJoinRole           string `yaml:"auto_join_role"             json:"auto_join_role"`
+	AutoJoinAsActiveTenant bool   `yaml:"auto_join_as_active_tenant" json:"auto_join_as_active_tenant"`
 }
 
 // AuthRegistrationMode constants used by handlers and middleware.
@@ -571,6 +578,11 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
 				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
 		}
+		role := types.TenantRole(strings.TrimSpace(cfg.Auth.AutoJoinRole))
+		if role != "" && !role.IsValid() {
+			errs = append(errs, fmt.Sprintf("auth.auto_join_role must be one of owner/admin/contributor/viewer, got %q",
+				cfg.Auth.AutoJoinRole))
+		}
 	}
 
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
@@ -727,11 +739,17 @@ func applyAgentEnvOverrides(cfg *Config) {
 //     config.yaml `enable_rbac: false` or `WEKNORA_TENANT_ENABLE_RBAC=false`).
 //
 // Env overrides (when set and non-empty):
-//   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
+//   - WEKNORA_TENANT_ENABLE_RBAC        ("true"/"false", case-insensitive)
 //   - WEKNORA_TENANT_MAX_OWNED_PER_USER (integer; <0 disables the cap,
 //     0 falls back to the handler default, >0 enforces that exact cap).
 //     Unparseable / empty values are ignored so a stale shell variable
 //     can't silently disable the quota for a future deployment.
+//   - WEKNORA_AUTH_AUTO_JOIN_TENANT_ID (>0 enables automatic membership for
+//     new registrations)
+//   - WEKNORA_AUTH_AUTO_JOIN_ROLE (viewer/contributor/admin/owner; default
+//     viewer when auto-join is enabled)
+//   - WEKNORA_AUTH_AUTO_JOIN_AS_ACTIVE ("true"/"false"; when true, fresh
+//     logins land in the auto-join tenant)
 //
 // Note: auth.registration_mode has no dedicated env override. The
 // long-standing DISABLE_REGISTRATION=true env var is the single env-layer
@@ -760,6 +778,26 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 
 	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
 		cfg.Auth.RegistrationMode = AuthRegistrationModeSelfServe
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_AUTO_JOIN_TENANT_ID")); value != "" {
+		if parsed, err := strconv.ParseUint(value, 10, 64); err == nil {
+			cfg.Auth.AutoJoinTenantID = parsed
+		} else {
+			fmt.Printf("[config] ignoring invalid WEKNORA_AUTH_AUTO_JOIN_TENANT_ID=%q: %v\n", value, err)
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_AUTO_JOIN_ROLE")); value != "" {
+		cfg.Auth.AutoJoinRole = strings.ToLower(value)
+	}
+	if value := strings.TrimSpace(cfg.Auth.AutoJoinRole); value != "" {
+		cfg.Auth.AutoJoinRole = strings.ToLower(value)
+	}
+	if cfg.Auth.AutoJoinTenantID > 0 && strings.TrimSpace(cfg.Auth.AutoJoinRole) == "" {
+		cfg.Auth.AutoJoinRole = string(types.TenantRoleViewer)
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_AUTO_JOIN_AS_ACTIVE")); value != "" {
+		cfg.Auth.AutoJoinAsActiveTenant = strings.EqualFold(value, "true")
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {

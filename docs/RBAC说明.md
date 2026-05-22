@@ -128,9 +128,24 @@ audit:
 | 环境变量 | YAML 路径 | 取值 |
 |----------|-----------|------|
 | `WEKNORA_TENANT_ENABLE_RBAC` | `tenant.enable_rbac` | `true` / `false` |
+| `WEKNORA_AUTH_AUTO_JOIN_TENANT_ID` | `auth.auto_join_tenant_id` | 已有租户 ID；大于 0 时，新注册用户自动加入该租户 |
+| `WEKNORA_AUTH_AUTO_JOIN_ROLE` | `auth.auto_join_role` | `viewer` / `contributor` / `admin` / `owner`；自动加入开启时默认 `viewer` |
+| `WEKNORA_AUTH_AUTO_JOIN_AS_ACTIVE` | `auth.auto_join_as_active_tenant` | `true` / `false`；为 `true` 时，新用户注册后默认进入自动加入的租户 |
 | `WEKNORA_AUDIT_RETENTION_DAYS` | `audit.retention_days` | 非负整数 |
 
 `auth.registration_mode` 没有专属环境变量，沿用历史的 `DISABLE_REGISTRATION=true`——一旦设置，启动时会把 `auth.registration_mode` 强制改成 `invite_only`，保证后端 API 和 `/auth/config` 驱动的前端注册入口一致。
+
+若要把一个已配置好知识库的自部署实例开放给他人只读使用，推荐保持公开注册，并开启自动加入：
+
+```env
+WEKNORA_TENANT_ENABLE_RBAC=true
+DISABLE_REGISTRATION=false
+WEKNORA_AUTH_AUTO_JOIN_TENANT_ID=<你的知识库所在租户 ID>
+WEKNORA_AUTH_AUTO_JOIN_ROLE=viewer
+WEKNORA_AUTH_AUTO_JOIN_AS_ACTIVE=true
+```
+
+这样新注册用户仍会拥有自己的默认工作区，但会被额外加入你指定的共享工作区，角色为 `viewer`。`viewer` 可以阅读、检索和提问，但不能修改知识库、租户配置、模型/解析器/存储等配置，也不会在租户详情、登录态或 `/auth/me` 响应中看到租户 API Key 与敏感配置。
 
 启动日志会打印一行总结，确认本次启动到底使用了哪一组配置以及覆盖来源。
 

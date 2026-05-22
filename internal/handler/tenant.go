@@ -94,6 +94,30 @@ type updateTenantRequest struct {
 // blunting drive-by abuse against POST /tenants (see CreateTenant).
 const defaultMaxOwnedTenantsPerUser = 10
 
+func safeTenantForResponse(tenant *types.Tenant) *types.Tenant {
+	if tenant == nil {
+		return nil
+	}
+	cp := *tenant
+	cp.APIKey = ""
+	cp.ContextConfig = nil
+	cp.WebSearchConfig = nil
+	cp.ParserEngineConfig = nil
+	cp.Credentials = nil
+	cp.StorageEngineConfig = nil
+	cp.ChatHistoryConfig = nil
+	cp.RetrievalConfig = nil
+	return &cp
+}
+
+func safeTenantsForResponse(tenants []*types.Tenant) []*types.Tenant {
+	out := make([]*types.Tenant, 0, len(tenants))
+	for _, tenant := range tenants {
+		out = append(out, safeTenantForResponse(tenant))
+	}
+	return out
+}
+
 // CreateTenant godoc
 // @Summary      创建租户
 // @Description  创建新的租户。任意已登录用户均可调用以建立自己的新工作区，
@@ -327,7 +351,7 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    tenant,
+		"data":    safeTenantForResponse(tenant),
 	})
 }
 
@@ -531,7 +555,7 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": []*types.Tenant{tenant},
+			"items": []*types.Tenant{safeTenantForResponse(tenant)},
 		},
 	})
 }
@@ -568,7 +592,7 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": tenants,
+			"items": safeTenantsForResponse(tenants),
 		},
 	})
 }
@@ -638,7 +662,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items":     tenants,
+			"items":     safeTenantsForResponse(tenants),
 			"total":     total,
 			"page":      page,
 			"page_size": pageSize,

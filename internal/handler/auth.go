@@ -19,6 +19,22 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+func redactTenantAPIKeyForAuth(tenant *types.Tenant) *types.Tenant {
+	if tenant == nil {
+		return nil
+	}
+	cp := *tenant
+	cp.APIKey = ""
+	cp.ContextConfig = nil
+	cp.WebSearchConfig = nil
+	cp.ParserEngineConfig = nil
+	cp.Credentials = nil
+	cp.StorageEngineConfig = nil
+	cp.ChatHistoryConfig = nil
+	cp.RetrievalConfig = nil
+	return &cp
+}
+
 // AuthHandler implements HTTP request handlers for user authentication
 // Provides functionality for user registration, login, logout, and token management
 // through the REST API endpoints
@@ -477,7 +493,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"user":        userInfo,
-			"tenant":      tenant,
+			"tenant":      redactTenantAPIKeyForAuth(tenant),
 			"memberships": memberships,
 		},
 	})
@@ -738,7 +754,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		Success:      true,
 		Message:      "Auto-setup successful",
 		User:         user,
-		ActiveTenant: tenant,
+		ActiveTenant: redactTenantAPIKeyForAuth(tenant),
 		Memberships: []types.Membership{{
 			TenantID:   user.TenantID,
 			TenantName: tenantNameOrEmpty(tenant),

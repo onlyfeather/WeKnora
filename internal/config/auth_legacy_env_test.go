@@ -31,6 +31,9 @@ func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t 
 			// Other tenant env vars must not leak between cases.
 			t.Setenv("WEKNORA_TENANT_ENABLE_RBAC", "")
 			t.Setenv("WEKNORA_TENANT_MAX_OWNED_PER_USER", "")
+			t.Setenv("WEKNORA_AUTH_AUTO_JOIN_TENANT_ID", "")
+			t.Setenv("WEKNORA_AUTH_AUTO_JOIN_ROLE", "")
+			t.Setenv("WEKNORA_AUTH_AUTO_JOIN_AS_ACTIVE", "")
 
 			cfg := &Config{Auth: &AuthConfig{RegistrationMode: tc.cfgMode}}
 			applyAuthAndTenantDefaults(cfg)
@@ -39,5 +42,35 @@ func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t 
 				t.Fatalf("registration_mode = %q, want %q", cfg.Auth.RegistrationMode, tc.expected)
 			}
 		})
+	}
+}
+
+func TestApplyAuthAndTenantDefaults_AutoJoinEnv(t *testing.T) {
+	t.Setenv("WEKNORA_AUTH_AUTO_JOIN_TENANT_ID", "42")
+	t.Setenv("WEKNORA_AUTH_AUTO_JOIN_ROLE", "viewer")
+	t.Setenv("WEKNORA_AUTH_AUTO_JOIN_AS_ACTIVE", "true")
+
+	cfg := &Config{Auth: &AuthConfig{}}
+	applyAuthAndTenantDefaults(cfg)
+
+	if cfg.Auth.AutoJoinTenantID != 42 {
+		t.Fatalf("AutoJoinTenantID = %d, want 42", cfg.Auth.AutoJoinTenantID)
+	}
+	if cfg.Auth.AutoJoinRole != "viewer" {
+		t.Fatalf("AutoJoinRole = %q, want viewer", cfg.Auth.AutoJoinRole)
+	}
+	if !cfg.Auth.AutoJoinAsActiveTenant {
+		t.Fatalf("AutoJoinAsActiveTenant = false, want true")
+	}
+}
+
+func TestApplyAuthAndTenantDefaults_AutoJoinDefaultsRoleToViewer(t *testing.T) {
+	t.Setenv("WEKNORA_AUTH_AUTO_JOIN_TENANT_ID", "42")
+
+	cfg := &Config{Auth: &AuthConfig{}}
+	applyAuthAndTenantDefaults(cfg)
+
+	if cfg.Auth.AutoJoinRole != "viewer" {
+		t.Fatalf("AutoJoinRole = %q, want viewer", cfg.Auth.AutoJoinRole)
 	}
 }

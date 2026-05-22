@@ -526,7 +526,7 @@ func RegisterTenantRoutes(
 		// is obtained from authentication context; the URL :key is a
 		// config key, not a tenant ID, so these stay outside the
 		// PathTenantMatch group.
-		tenantRoutes.GET("/kv/:key", g.Viewer(), handler.GetTenantKV)
+		tenantRoutes.GET("/kv/:key", g.Admin(), handler.GetTenantKV)
 		tenantRoutes.PUT("/kv/:key", g.Admin(), handler.UpdateTenantKV)
 
 		// Per-tenant endpoints share PathTenantMatch at the group level.
